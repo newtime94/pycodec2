@@ -1,0 +1,48 @@
+name: Build Windows Wheels
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.9, 3.10, 3.11]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install CMake
+        run: choco install --yes cmake
+
+      - name: Build libcodec2.dll & import lib
+        shell: bash
+        run: |
+          git clone https://github.com/drowe67/codec2.git codec2
+          cd codec2
+          mkdir build && cd build
+          cmake .. -A x64 -DUNITTEST=FALSE
+          cmake --build . --config Release
+          mkdir -p ../../lib_win
+          cp src/libcodec2.dll     ../../lib_win/libcodec2.dll
+          cp src/codec2.lib        ../../lib_win/libcodec2.lib
+
+      - name: Build Python wheels
+        uses: pypa/cibuildwheel@v2.23.2
+        with:
+          platform: windows
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: pycodec2-windows-wheels
+          path: wheelhouse/*.whl
