@@ -1,0 +1,68 @@
+name: Build Windows Wheels
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.9, 3.10, 3.11]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build tools
+        run: |
+          choco install --yes cmake ninja
+
+      - name: Build libcodec2.dll & import lib
+        shell: bash
+        run: |
+          set -e
+
+          # 1) Clone upstream Codec2
+          git clone https://github.com/drowe67/codec2.git codec2
+          cd codec2
+
+          # 2) Strip out Linux‑only flags
+          sed -i 's/-Wall//g; s/-Wno-strict-overflow//g; s/-O3//g' CMakeLists.txt
+
+          # 3) Remove the stray math‑lib on generate_codebook
+          sed -i 's/target_link_libraries(generate_codebook m)/target_link_libraries(generate_codebook)/' src/CMakeLists.txt
+
+          # 4) Wrap the sample apps in if(NOT WIN32)…endif()
+          sed -i '/add_executable(c2enc)/i if(NOT WIN32)' src/CMakeLists.txt
+          sed -i '/install(TARGETS codec2 EXPORT codec2-config)/i endif()' src/CMakeLists.txt
+
+          # 5) Configure & build only the codec2 DLL
+          mkdir build && cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DUNITTEST=FALSE
+          cmake --build . --config Release --target codec2
+
+          # 6) Stage the DLL + import‑lib for the Python extension
+          mkdir -p ../../lib_win
+          cp src/libcodec2.dll  ../../lib_win/libcodec2.dll
+          cp src/codec2.lib     ../../lib_win/codec2.lib
+
+      - name: Build Python wheels
+        uses: pypa/cibuildwheel@v2.23.2
+        with:
+          platform: windows
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: pycodec2-windows-wheels
+          path: wheelhouse/*.whl
+
+
